@@ -228,7 +228,7 @@ def main_trainer(gpu, ngpus_per_node, argss):
                                    'all_ap_25': ap_3d['all_ap_25%']})
 
         if ((epoch + 1) % args.save_freq == 0) and main_process():
-            is_best = ap_3d['all_ap_50%'] > best_ap
+            is_best = ap_3d['all_ap_50%'] >= best_ap
             best_ap = max(best_ap, ap_3d['all_ap_50%'])
             save_checkpoint(
                 {

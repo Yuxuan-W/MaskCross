@@ -46,7 +46,6 @@ def main_trainer(gpu, ngpus_per_node, argss):
     args = argss
 
     if main_process():
-        global logger
         logger = setup_logger("train", args.save_path, "train.txt")
         logger.info(args)
 
@@ -132,7 +131,6 @@ def main_trainer(gpu, ngpus_per_node, argss):
         model.train()
         if main_process():
             loss_meter = AverageMeter()
-            pbar = tqdm(total=len(train_loader))
         for i, (data, target, file_names) in enumerate(train_loader):
             raw_coordinates = data.features[:, -3:]
             data.features = data.features[:, :-3]
@@ -163,7 +161,6 @@ def main_trainer(gpu, ngpus_per_node, argss):
 
             if main_process():
                 loss_meter.update(loss.item())
-                pbar.update(1)
 
         if main_process():
             logger.info('Epoch: [{}/{}][{}/{}] '

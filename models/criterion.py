@@ -7,11 +7,17 @@ MaskFormer criterion.
 
 import torch
 import torch.nn.functional as F
+import torch.distributed as dist
 from torch import nn
-
-from detectron2.utils.comm import get_world_size
-
 from models.misc import is_dist_avail_and_initialized, nested_tensor_from_tensor_list
+
+
+def get_world_size() -> int:
+    if not dist.is_available():
+        return 1
+    if not dist.is_initialized():
+        return 1
+    return dist.get_world_size()
 
 
 def dice_loss(

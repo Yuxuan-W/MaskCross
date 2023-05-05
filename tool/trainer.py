@@ -81,6 +81,8 @@ def main_trainer(gpu, ngpus_per_node, argss):
         args.batch_size_val = int(args.batch_size_val / ngpus_per_node)
         args.workers = int(args.workers / ngpus_per_node)
         model = torch.nn.parallel.DistributedDataParallel(model.cuda(), device_ids=[gpu])
+    else:
+        model.to('cuda')
 
     # if args.weight:
     #     assert os.path.isfile(args.weight)
@@ -128,6 +130,8 @@ def main_trainer(gpu, ngpus_per_node, argss):
     best_ap = 0
 
     for epoch in range(args.epochs):
+        if args.distributed:
+            train_sampler.set_epoch(epoch)
         model.train()
         if main_process():
             loss_meter = AverageMeter()
@@ -136,7 +140,7 @@ def main_trainer(gpu, ngpus_per_node, argss):
             data.features = data.features[:, :-3]
             data = ME.SparseTensor(coordinates=data.coordinates,
                                    features=data.features,
-                                   device=model.device)
+                                   device='cuda')
             for tgt in target:
                 for k, v in tgt.items():
                     tgt[k] = v.cuda(non_blocking=True)
@@ -188,7 +192,7 @@ def main_trainer(gpu, ngpus_per_node, argss):
                     original_coordinates = data.original_coordinates
                     raw_coordinates = data.features[:, -3:]
                     data.features = data.features[:, :-3]
-                    data = ME.SparseTensor(coordinates=data.coordinates, features=data.features, device=model.device)
+                    data = ME.SparseTensor(coordinates=data.coordinates, features=data.features, device='cuda')
 
                     for tgt in target:
                         for k, v in tgt.items():

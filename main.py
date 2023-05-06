@@ -63,6 +63,10 @@ def main():
         args.multiprocessing_distributed = False
         args.use_apex = False
 
+    if args.task == 'semantic_segmentation':
+        args.filter_out_classes = []
+        args.classes = 21
+
     if 'train' in args.mode:
         if args.multiprocessing_distributed:
             args.world_size = args.ngpus_per_node * args.world_size

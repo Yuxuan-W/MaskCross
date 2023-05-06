@@ -9,8 +9,8 @@ from datasets.semseg import ScannetDataset
 from datasets.utils import VoxelizeCollate
 from models.mask3d import Mask3D
 from util.logger import setup_logger
-from util.inference import eval_instance_step
-from util.evaluate import evaluate_instance, log_instance_results
+from util.inference import instance_inference, semantic_inference
+from util.evaluate import evaluate_instance, log_instance_results, evaluate_semantic, log_semantic_results
 
 
 def worker_init_fn(worker_id):
@@ -51,7 +51,7 @@ def main_tester(argss):
     test_collator = VoxelizeCollate(mode='validation', ignore_label=args.ignore_label,
                                     num_queries=args.num_object_queries, voxel_size=args.voxelSize,
                                     filter_out_classes=args.filter_out_classes,
-                                    label_offset=len(args.filter_out_classes))
+                                    label_offset=len(args.filter_out_classes), task=args.task)
     test_loader = torch.utils.data.DataLoader(test_data, batch_size=args.test_batch_size,
                                              shuffle=False, num_workers=args.test_workers, pin_memory=True,
                                              drop_last=False, collate_fn=test_collator,
@@ -86,13 +86,25 @@ def main_tester(argss):
                 pca_features = pca.transform(backbone_features)
                 rescaled_pca = 255 * (pca_features - pca_features.min()) / (pca_features.max() - pca_features.min())
 
-            preds.update(eval_instance_step(args, output, target, target_full, inverse_maps, file_names,
-                                            original_coordinates, original_colors, original_normals,
-                                            raw_coordinates, data_idx,
-                                            backbone_features=rescaled_pca if args.save_visualizations else None,
-                                            test_mode='validation',
-                                            remap_model_output=test_data.remap_model_output))
+            if args.task == "instance_segmentation":
+                preds.update(instance_inference(args, output, target, target_full, inverse_maps, file_names,
+                                                original_coordinates, original_colors, original_normals,
+                                                raw_coordinates, data_idx,
+                                                backbone_features=rescaled_pca if args.save_visualizations else None,
+                                                test_mode='validation',
+                                                remap_model_output=test_data.remap_model_output))
+            elif args.task == "semantic_segmentation":
+                preds.update(semantic_inference(args, output, target, target_full, inverse_maps, file_names))
+            else:
+                raise ValueError
+
             pbar.update(1)
 
-        ap_3d = evaluate_instance(preds, os.path.join(args.data_root, 'instance_gt/validation'))
-        log_instance_results(ap_3d, logger)
+        if args.task == "instance_segmentation":
+            ap_3d = evaluate_instance(args, preds)
+            log_instance_results(ap_3d, logger)
+        elif args.task == "semantic_segmentation":
+            iou_3d = evaluate_semantic(args, preds)
+            log_semantic_results(iou_3d, logger)
+        else:
+            raise ValueError

@@ -17,19 +17,8 @@ from datasets.semseg import ScannetDataset
 from datasets.utils import VoxelizeCollate
 from util.logger import setup_logger
 from util.misc import save_checkpoint, AverageMeter
-from util.inference import eval_instance_step
-from util.evaluate import evaluate_instance, log_instance_results
-
-
-def get_logger():
-    logger_name = "main-logger"
-    logger = logging.getLogger(logger_name)
-    logger.setLevel(logging.INFO)
-    handler = logging.StreamHandler()
-    fmt = "[%(asctime)s %(levelname)s %(filename)s line %(lineno)d %(process)d] %(message)s"
-    handler.setFormatter(logging.Formatter(fmt))
-    logger.addHandler(handler)
-    return logger
+from util.inference import instance_inference, semantic_inference
+from util.evaluate import evaluate_instance, log_instance_results, evaluate_semantic, log_semantic_results
 
 
 def worker_init_fn(worker_id):
@@ -101,7 +90,7 @@ def main_trainer(gpu, ngpus_per_node, argss):
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_data) if args.distributed else None
     train_collator = VoxelizeCollate(mode='train', ignore_label=args.ignore_label, num_queries=args.num_object_queries,
                                      voxel_size=args.voxelSize, filter_out_classes=args.filter_out_classes,
-                                     label_offset=len(args.filter_out_classes))
+                                     label_offset=len(args.filter_out_classes), task=args.task)
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=args.batch_size,
                                                shuffle=(train_sampler is None),
                                                num_workers=args.workers, pin_memory=True, sampler=train_sampler,
@@ -117,17 +106,18 @@ def main_trainer(gpu, ngpus_per_node, argss):
     val_sampler = None
     val_collator = VoxelizeCollate(mode='validation', ignore_label=args.ignore_label, num_queries=args.num_object_queries,
                                    voxel_size=args.voxelSize, filter_out_classes=args.filter_out_classes,
-                                   label_offset=len(args.filter_out_classes))
+                                   label_offset=len(args.filter_out_classes), task=args.task)
     val_loader = torch.utils.data.DataLoader(val_data, batch_size=args.batch_size_val,
                                              shuffle=False, num_workers=args.workers, pin_memory=True,
                                              drop_last=False, collate_fn=val_collator,
                                              sampler=val_sampler)
 
-    criterion = SetCriterion(args, HungarianMatcher(args.cost_class, args.cost_mask, args.cost_dice)).cuda()
+    criterion = SetCriterion(args, HungarianMatcher(args.cost_class, args.cost_mask, args.cost_dice,
+                                                    args.ignore_label - len(args.filter_out_classes))).cuda()
 
     optimizer = AdamW(lr=args.base_lr, weight_decay=args.weight_decay, params=model.parameters())
     scheduler = OneCycleLR(optimizer, epochs=args.epochs, max_lr=args.base_lr, steps_per_epoch=len(train_loader))
-    best_ap = 0
+    best_res = 0.0
 
     for epoch in range(args.epochs):
         if args.distributed:
@@ -212,30 +202,47 @@ def main_trainer(gpu, ngpus_per_node, argss):
                     loss = sum(losses.values())
 
                     if main_process():
-                        preds.update(eval_instance_step(args, output, target, target_full, inverse_maps, file_names,
-                                                        original_coordinates, original_colors, original_normals,
-                                                        raw_coordinates, data_idx,
-                                                        backbone_features=None,
-                                                        test_mode='validation',
-                                                        remap_model_output=val_data.remap_model_output))
+                        if args.task == "instance_segmentation":
+                            preds.update(instance_inference(args, output, target, target_full, inverse_maps, file_names,
+                                                            original_coordinates, original_colors, original_normals,
+                                                            raw_coordinates, data_idx,
+                                                            backbone_features=None,
+                                                            test_mode='validation',
+                                                            remap_model_output=val_data.remap_model_output))
+                        elif args.task == "semantic_segmentation":
+                            preds.update(semantic_inference(args, output, target, target_full, inverse_maps, file_names))
+                        else:
+                            raise ValueError
                         pbar.update(1)
 
                 if main_process():
-                    ap_3d = evaluate_instance(preds, os.path.join(args.data_root, 'instance_gt/validation'))
-                    log_instance_results(ap_3d, logger)
-                    if "debug" not in args.save_path:
-                        wandb.log({'all_ap': ap_3d['all_ap'],
-                                   'all_ap_50': ap_3d['all_ap_50%'],
-                                   'all_ap_25': ap_3d['all_ap_25%']})
+                    if args.task == "instance_segmentation":
+                        ap_3d = evaluate_instance(args, preds)
+                        log_instance_results(ap_3d, logger)
+                        if "debug" not in args.save_path:
+                            wandb.log({'all_ap': ap_3d['all_ap'],
+                                       'all_ap_50': ap_3d['all_ap_50%'],
+                                       'all_ap_25': ap_3d['all_ap_25%']})
+                        curr_res = ap_3d['all_ap_50%']
+                    elif args.task == "semantic_segmentation":
+                        iou_3d = evaluate_semantic(args, preds)
+                        log_semantic_results(iou_3d, logger)
+                        if "debug" not in args.save_path:
+                            wandb.log({'mIoU_3d': iou_3d['mIoU_3d'],
+                                       'mAcc_3d': iou_3d['mAcc_3d'],
+                                       'allAcc_3d': iou_3d['allAcc_3d']})
+                        curr_res = iou_3d['mIoU_3d']
+                    else:
+                        raise ValueError
 
         if ((epoch + 1) % args.save_freq == 0) and main_process():
-            is_best = ap_3d['all_ap_50%'] >= best_ap
-            best_ap = max(best_ap, ap_3d['all_ap_50%'])
+            is_best = curr_res >= best_res
+            best_res = max(best_res, curr_res)
             save_checkpoint(
                 {
                     'epoch': epoch + 1,
                     'state_dict': model.module.state_dict() if args.distributed else model.state_dict(),
                     'optimizer': optimizer.state_dict(),
-                    'best': best_ap
+                    'best': best_res
                 }, is_best, os.path.join(args.save_path, 'model'), f'epoch{epoch + 1}.pth.tar'
             )

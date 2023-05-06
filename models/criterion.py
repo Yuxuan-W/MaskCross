@@ -111,6 +111,7 @@ class SetCriterion(nn.Module):
         self.matcher = matcher
         self.eos_coef = cfg.eos_coef
         self.losses = cfg.losses
+        self.ignore_label = cfg.ignore_label - len(cfg.filter_out_classes)
         empty_weight = torch.ones(self.num_classes + 1)
         empty_weight[-1] = self.eos_coef
 
@@ -140,7 +141,7 @@ class SetCriterion(nn.Module):
         )
         target_classes[idx] = target_classes_o
 
-        loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight, ignore_index=253)
+        loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight, ignore_index=self.ignore_label)
         losses = {"loss_ce": loss_ce}
         return losses
 

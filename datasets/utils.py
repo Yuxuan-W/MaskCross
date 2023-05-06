@@ -311,6 +311,7 @@ def voxelize(batch, ignore_label, voxel_size, probing, mode, task,
                                                      label_offset=label_offset)
                     for i in range(len(target_full)):
                         target_full[i]["point2segment"] = torch.from_numpy(original_labels[i][:, 2]).long()
+                        target_full[i]["full_label"] = torch.from_numpy(original_labels[i][:, 0]).long()
     else:
         target = []
         target_full = []

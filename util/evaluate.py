@@ -6,6 +6,7 @@ import json
 import numpy as np
 import torch
 from copy import deepcopy
+from util.misc import AverageMeter
 import torch.distributed as dist
 
 
@@ -195,7 +196,9 @@ def log_instance_results(avgs, logger):
     logger.info(line)
     logger.info("#"*lineLen)
 
-    for (li,label_name) in enumerate(CLASS_LABELS):
+    for (li,label_name) in enumerate(['cabinet', 'bed', 'chair', 'sofa', 'table', 'door', 'window', 'bookshelf',
+                                      'picture', 'counter', 'desk', 'curtain', 'refrigerator', 'shower curtain',
+                                      'toilet', 'sink', 'bathtub', 'otherfurniture']):
         ap_avg  = avgs["classes"][label_name]["ap"]
         ap_50o  = avgs["classes"][label_name]["ap50%"]
         ap_25o  = avgs["classes"][label_name]["ap25%"]
@@ -393,7 +396,8 @@ def evaluate_matches(matches):
     return ap
 
 
-def evaluate_instance(preds: dict, gt_path: str):
+def evaluate_instance(args, preds: dict):
+    gt_path = os.path.join(args.data_root, 'instance_gt/validation')
     global CLASS_LABELS
     global VALID_CLASS_IDS
     global ID_TO_LABEL
@@ -449,32 +453,65 @@ def evaluate_instance(preds: dict, gt_path: str):
     return avgs
 
 
-def collect_prediction_dist(args, output_3d):
-    tmp_name = os.path.join(args.save_path, f'val_output_3d_tmp_rank{dist.get_rank()}_temp.npy')
-    if os.path.isfile(tmp_name):
-        os.remove(tmp_name)
-    cache_name = os.path.join(args.save_path, f'val_output_3d_tmp_rank{dist.get_rank()}.npy')
-    if os.path.isfile(cache_name):
-        os.remove(cache_name)
-    np.save(tmp_name, output_3d)
-    os.rename(tmp_name, cache_name)
+def log_semantic_results(avgs, logger):
+    sep     = ""
+    col1    = ":"
+    lineLen = 64
 
-    for rank in range(dist.get_world_size()):
-        if rank == dist.get_rank():
-            continue
-        cache_name = os.path.join(args.save_path, f'val_output_3d_tmp_rank{rank}.npy')
-        while not os.path.isfile(cache_name):
-            time.sleep(1)
-        output_3d += np.load(cache_name, allow_pickle=True).tolist()
-    return output_3d
+    logger.info("")
+    logger.info("#"*lineLen)
+    line  = ""
+    line += "{:<15}".format("what"      ) + sep + col1
+    line += "{:>15}".format("IoU"        ) + sep
+    line += "{:>15}".format("Acc"    ) + sep
+    line += "{:>15}".format("all_Acc"    ) + sep
+    logger.info(line)
+    logger.info("#"*lineLen)
+
+    for (li,label_name) in enumerate(['wall', 'floor', 'cabinet', 'bed', 'chair', 'sofa', 'table', 'door',  'window',
+                                      'bookshelf', 'picture', 'counter', 'desk', 'curtain', 'refrigerator',
+                                      'shower curtain', 'toilet', 'sink', 'bathtub', 'otherfurniture']):
+        iou_avg = avgs["iou_classes"][li]
+        acc_avg = avgs["acc_classes"][li]
+        line  = "{:<15}".format(label_name) + sep + col1
+        line += sep + "{:>15.3f}".format(iou_avg) + sep
+        line += sep + "{:>15.3f}".format(acc_avg) + sep
+        line += sep + "{:>15}".format("-") + sep
+        logger.info(line)
+
+    mIoU_3d = avgs["mIoU_3d"]
+    mAcc_3d = avgs["mAcc_3d"]
+    allAcc_3d = avgs["allAcc_3d"]
+
+    logger.info("-"*lineLen)
+    line  = "{:<15}".format("average") + sep + col1
+    line += "{:>15.3f}".format(mIoU_3d)  + sep
+    line += "{:>15.3f}".format(mAcc_3d)  + sep
+    line += "{:>15.3f}".format(allAcc_3d)  + sep
+    logger.info(line)
+    logger.info("")
 
 
-def pred_list2dict(output_3d):
-    output_dict = dict()
-    for item in output_3d:
-        id = item['id']
-        if id not in output_dict:
-            del item['id']
-            output_dict[id] = item
+def evaluate_semantic(args, preds):
+    intersection_meter_3d, union_meter_3d, target_meter_3d = AverageMeter(), AverageMeter(), AverageMeter()
+    for scene_name, [pred, gt] in preds.items():
+        pred = torch.argmax(pred, dim=-1)
+        intersection, union, target = intersectionAndUnionGPU(pred, gt, args.classes - 1, args.ignore_label)
+        intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
+        intersection_meter_3d.update(intersection)
+        union_meter_3d.update(union)
+        target_meter_3d.update(target)
+    iou_class_3d = intersection_meter_3d.sum / (union_meter_3d.sum + 1e-10)
+    accuracy_class_3d = intersection_meter_3d.sum / (target_meter_3d.sum + 1e-10)
+    mIoU_3d = np.mean(iou_class_3d[np.nonzero(iou_class_3d)])
+    mAcc_3d = np.mean(accuracy_class_3d[np.nonzero(accuracy_class_3d)])
+    allAcc_3d = sum(intersection_meter_3d.sum) / (sum(target_meter_3d.sum) + 1e-10)
 
-    return output_dict
+    res = {
+        'mIoU_3d': mIoU_3d,
+        'mAcc_3d': mAcc_3d,
+        'allAcc_3d': allAcc_3d,
+        'iou_classes': iou_class_3d,
+        'acc_classes': accuracy_class_3d
+    }
+    return res

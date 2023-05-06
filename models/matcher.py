@@ -73,7 +73,7 @@ class HungarianMatcher(nn.Module):
     while the others are un-matched (and thus treated as non-objects).
     """
 
-    def __init__(self, cost_class: float = 1, cost_mask: float = 1, cost_dice: float = 1, num_points: int = -1):
+    def __init__(self, cost_class: float = 1, cost_mask: float = 1, cost_dice: float = 1, ignore_label: int = 255, num_points: int = -1):
         """Creates the matcher
 
         Params:
@@ -85,6 +85,7 @@ class HungarianMatcher(nn.Module):
         self.cost_class = cost_class
         self.cost_mask = cost_mask
         self.cost_dice = cost_dice
+        self.ignore_label = ignore_label
 
         assert cost_class != 0 or cost_mask != 0 or cost_dice != 0, "all costs cant be 0"
 
@@ -106,7 +107,7 @@ class HungarianMatcher(nn.Module):
             # Compute the classification cost. Contrary to the loss, we don't use the NLL,
             # but approximate it in 1 - proba[target class].
             # The 1 is a constant that doesn't change the matching, it can be ommitted.
-            filter_ignore = (tgt_ids == 253)
+            filter_ignore = (tgt_ids == self.ignore_label)
             tgt_ids[filter_ignore] = 0
             cost_class = -out_prob[:, tgt_ids]
             cost_class[:, filter_ignore] = -1.  # for ignore classes pretend perfect match ;) TODO better worst class match?

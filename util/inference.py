@@ -3,6 +3,7 @@ import numpy as np
 from pathlib import Path
 from sklearn.cluster import DBSCAN
 from torch_scatter import scatter_mean
+import torch.nn.functional as F
 from util.visualization import save_visualizations
 
 
@@ -41,7 +42,7 @@ def get_mask_and_scores(args, mask_cls, mask_pred, num_queries=100, num_classes=
     return score, result_pred_mask, classes, heatmap
 
 
-def eval_instance_step(args, output, target_low_res, target_full_res, inverse_maps, file_names, full_res_coords,
+def instance_inference(args, output, target_low_res, target_full_res, inverse_maps, file_names, full_res_coords,
                        original_colors, original_normals, raw_coords, idx, remap_model_output,
                        backbone_features=None, test_mode='validation'):
     preds = {}
@@ -172,3 +173,44 @@ def eval_instance_step(args, output, target_low_res, target_full_res, inverse_ma
     return preds
 
 
+def get_full_res_logit(mask, inverse_map, point2segment_full, on_segments):
+    mask = mask.detach().cpu()[inverse_map]  # full res
+
+    if on_segments:
+        mask = scatter_mean(mask, point2segment_full, dim=0)  # full res segments
+        mask = mask.detach().cpu()[point2segment_full.cpu()]  # full res points
+
+    return mask
+
+
+def semantic_inference(args, output_dec, target_low_res, target_full_res, inverse_maps, file_names, seg_size=None):
+    mask_cls_results = output_dec["pred_logits"]
+    mask_pred_results = output_dec["pred_masks"]
+
+    if seg_size:  # 2d
+        B, Q, H, W, V = mask_pred_results.shape
+        mask_pred_results = mask_pred_results.permute(4, 0, 1, 2, 3).contiguous().view(V*B, Q, H, W)
+        # upsample masks
+        mask_pred_results = F.interpolate(
+            mask_pred_results,
+            size=seg_size,
+            mode="bilinear",
+            align_corners=False,
+        )
+        V_B, C, H, W = mask_pred_results.shape
+        mask_pred_results = mask_pred_results.view(V, B, C, H, W).permute(1, 2, 3, 4, 0).contiguous()
+        mask_cls = F.softmax(mask_cls_results, dim=-1)[..., :-1]
+        mask_pred = mask_pred_results.sigmoid()
+        semseg = torch.einsum("bqc,bqhwv->bchwv", mask_cls, mask_pred)
+    else:   #3d
+        mask_cls = F.softmax(mask_cls_results, dim=-1)[..., :-1]
+        semseg = {}
+        for bid in range(len(mask_pred_results)):
+            mask_cls_batch = mask_cls[bid]
+            mask_pred_batch = mask_pred_results[bid].sigmoid()
+            mask_pred_batch = mask_pred_batch[target_low_res[bid]['point2segment']]
+            semseg_batch = torch.einsum("qc,nq->nc", mask_cls_batch, mask_pred_batch)
+            semseg_batch = get_full_res_logit(semseg_batch, inverse_maps[bid], target_full_res[bid]['point2segment'],
+                                              on_segments=args.on_segment)
+            semseg[file_names[bid]] = [semseg_batch, target_full_res[bid]['full_label']]
+    return semseg

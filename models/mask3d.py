@@ -7,7 +7,7 @@ import numpy as np
 from torch.nn import functional as F
 from models.modules.common import conv
 from models.position_embedding import PositionEmbeddingCoordsSine
-from models.backbones_3d.res16unet import Res16UNet34C
+from models.backbones_3d.res16unet import Res16UNet34C, Res16UNet18A
 from third_party.pointnet2.pointnet2_utils import furthest_point_sample
 from models.modules.helpers_3detr import GenericMLP
 from torch_scatter import scatter_mean, scatter_max, scatter_min
@@ -35,9 +35,14 @@ class Mask3D(nn.Module):
         self.num_queries = config.num_object_queries
         self.dim_feedforward = config.dim_feedforward
 
-        assert config.backbone._target_ == 'Res16UNet34C'
-        self.backbone = Res16UNet34C(config.backbone.in_channels, config.backbone.in_channels,
-                                     config.backbone.config, config.backbone.out_fpn)
+        if config.backbone._target_ == 'Res16UNet34C':
+            self.backbone = Res16UNet34C(config.backbone.in_channels, config.backbone.in_channels,
+                                         config.backbone.config, config.backbone.out_fpn)
+        elif config.backbone._target_ == 'Res16UNet18A':
+            self.backbone = Res16UNet18A(config.backbone.in_channels, config.backbone.in_channels,
+                                         config.backbone.config, config.backbone.out_fpn)
+        else:
+            raise ValueError
 
         sizes = self.backbone.PLANES[-5:]
 
@@ -142,7 +147,6 @@ class Mask3D(nn.Module):
     def forward(self, x, point2segment=None, raw_coordinates=None, is_eval=False):
 
         pcd_features, aux = self.backbone(x)
-        batch_size = len(x.decomposed_coordinates)
 
         with torch.no_grad():
             coordinates = me.SparseTensor(features=raw_coordinates,

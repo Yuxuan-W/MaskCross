@@ -1,4 +1,5 @@
 import os
+import shutil
 import time
 import random
 import numpy as np
@@ -36,6 +37,7 @@ def main():
     os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(str(x) for x in args.train_gpu)
     cudnn.benchmark = True
     localtime = time.localtime()
+
     args.save_path += "_{mon}-{day}_{hour}-{min}".format(mon=localtime.tm_mon,
                                                                day=localtime.tm_mday,
                                                                hour=localtime.tm_hour,
@@ -44,6 +46,7 @@ def main():
         os.mkdir(args.save_path)
     if not os.path.exists(os.path.join(args.save_path, 'model')):
         os.mkdir(os.path.join(args.save_path, 'model'))
+    shutil.copy(args.config, os.path.join(args.save_path, 'config.yaml'))
 
     if args.manual_seed is not None:
         random.seed(args.manual_seed)

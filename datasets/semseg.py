@@ -1,4 +1,5 @@
 import logging
+import os
 from itertools import product
 from pathlib import Path
 from random import random, sample, uniform
@@ -74,6 +75,8 @@ class ScannetDataset(Dataset):
         color_drop=0.0
     ):
         assert task in ["instance_segmentation", "semantic_segmentation"], "unknown task"
+        label_db_filepath = os.path.join(data_dir, label_db_filepath)
+        color_mean_std = os.path.join(data_dir, color_mean_std)
 
         self.add_clip = add_clip
         self.is_elastic_distortion = is_elastic_distortion

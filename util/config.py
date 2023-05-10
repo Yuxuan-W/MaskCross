@@ -58,7 +58,7 @@ class CfgNode(dict):
 
 
 def load_cfg_from_cfg_file(file):
-    cfg = {}
+    cfg = {'config': file}
     assert os.path.isfile(file) and file.endswith('.yaml'), \
         '{} is not a yaml file'.format(file)
 

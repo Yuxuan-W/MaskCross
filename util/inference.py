@@ -208,7 +208,8 @@ def semantic_inference(args, output_dec, target_low_res, target_full_res, invers
         for bid in range(len(mask_pred_results)):
             mask_cls_batch = mask_cls[bid]
             mask_pred_batch = mask_pred_results[bid].sigmoid()
-            mask_pred_batch = mask_pred_batch[target_low_res[bid]['point2segment']]
+            if args.on_segment:
+                mask_pred_batch = mask_pred_batch[target_low_res[bid]['point2segment']]
             semseg_batch = torch.einsum("qc,nq->nc", mask_cls_batch, mask_pred_batch)
             semseg_batch = get_full_res_logit(semseg_batch, inverse_maps[bid], target_full_res[bid]['point2segment'],
                                               on_segments=args.on_segment)

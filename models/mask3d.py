@@ -22,7 +22,7 @@ class Mask3D(nn.Module):
         self.num_levels = config.dec_layers
         self.hlevels = [i for i in range(config.dec_layers)]
         self.use_level_embed = config.use_level_embed
-        self.train_on_segments = config.on_segment
+        self.on_segments = config.on_segment
         self.normalize_pos_enc = config.normalize_pos_enc
         self.num_decoders = config.nloops
         self.num_classes = config.classes
@@ -163,7 +163,7 @@ class Mask3D(nn.Module):
         pos_encodings_pcd = self.get_pos_encs(coords)
         mask_features = self.mask_features_head(pcd_features)
 
-        if self.train_on_segments:
+        if self.on_segments:
             mask_segments = []
             for i, mask_feature in enumerate(mask_features.decomposed_features):
                 mask_segments.append(self.scatter_fn(mask_feature, point2segment[i], dim=0))
@@ -193,7 +193,7 @@ class Mask3D(nn.Module):
             if self.shared_decoder:
                 decoder_counter = 0
             for i, hlevel in enumerate(self.hlevels):
-                if self.train_on_segments:
+                if self.on_segments:
                     output_class, outputs_mask, attn_mask = self.mask_module(queries,
                                                           mask_features,
                                                           mask_segments,
@@ -296,7 +296,7 @@ class Mask3D(nn.Module):
                 predictions_class.append(output_class)
                 predictions_mask.append(outputs_mask)
 
-        if self.train_on_segments:
+        if self.on_segments:
             output_class, outputs_mask = self.mask_module(queries,
                                                           mask_features,
                                                           mask_segments,

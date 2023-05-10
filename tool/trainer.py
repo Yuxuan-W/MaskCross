@@ -80,9 +80,10 @@ def main_trainer(gpu, ngpus_per_node, argss):
     #     checkpoint = torch.load(args.weight)
     #     model.load_state_dict(checkpoint['state_dict'])
 
-    train_data = ScannetDataset(label_db_filepath=args.label_db_filepath, color_mean_std=args.color_mean_std,
-                                mode='train', add_colors=True, add_normals=False, add_instance=True, point_per_cut=0,
-                                add_raw_coordinates=True, num_labels=args.num_labels, ignore_label=args.ignore_label,
+    train_data = ScannetDataset(data_dir=args.data_root, label_db_filepath=args.label_db_filepath,
+                                color_mean_std=args.color_mean_std, mode='train', add_colors=True, add_normals=False,
+                                add_instance=True, point_per_cut=0, add_raw_coordinates=True,
+                                num_labels=args.num_labels, ignore_label=args.ignore_label,
                                 filter_out_classes=args.filter_out_classes, label_offset=len(args.filter_out_classes),
                                 volume_augmentations_path=args.volume_augmentations_path,
                                 image_augmentations_path=args.image_augmentations_path)
@@ -97,9 +98,10 @@ def main_trainer(gpu, ngpus_per_node, argss):
                                                drop_last=True, worker_init_fn=worker_init_fn,
                                                collate_fn=train_collator)
 
-    val_data = ScannetDataset(label_db_filepath=args.label_db_filepath, color_mean_std=args.color_mean_std,
-                              mode='validation', add_colors=True, add_normals=False, add_instance=True, point_per_cut=100,
-                              add_raw_coordinates=True, num_labels=args.num_labels, ignore_label=args.ignore_label,
+    val_data = ScannetDataset(data_dir=args.data_root, label_db_filepath=args.label_db_filepath,
+                              color_mean_std=args.color_mean_std, mode='validation', add_colors=True, add_normals=False,
+                              add_instance=True, point_per_cut=100, add_raw_coordinates=True,
+                              num_labels=args.num_labels, ignore_label=args.ignore_label,
                               filter_out_classes=args.filter_out_classes, label_offset=len(args.filter_out_classes))
 
     # val_sampler = torch.utils.data.distributed.DistributedSampler(val_data) if args.distributed else None
@@ -152,6 +154,7 @@ def main_trainer(gpu, ngpus_per_node, argss):
             loss.backward()
             optimizer.step()
             scheduler.step()
+            torch.cuda.empty_cache()
 
             if main_process():
                 loss_meter.update(loss.item())
@@ -200,6 +203,7 @@ def main_trainer(gpu, ngpus_per_node, argss):
                             # remove this loss if not specified in `weight_dict`
                             losses.pop(k)
                     loss = sum(losses.values())
+                    torch.cuda.empty_cache()
 
                     if main_process():
                         if args.task == "instance_segmentation":

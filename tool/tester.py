@@ -43,11 +43,11 @@ def main_tester(argss):
     else:
         raise RuntimeError("=> no checkpoint found at '{}'".format(args.model_path))
 
-    test_data = ScannetDataset(label_db_filepath=args.label_db_filepath, color_mean_std=args.color_mean_std,
-                               mode='validation', add_colors=True, add_normals=False, add_instance=True,
-                               point_per_cut=100, add_raw_coordinates=True, num_labels=args.num_labels,
-                               ignore_label=args.ignore_label, filter_out_classes=args.filter_out_classes,
-                               label_offset=len(args.filter_out_classes))
+    test_data = ScannetDataset(data_dir=args.data_root, label_db_filepath=args.label_db_filepath,
+                               color_mean_std=args.color_mean_std, mode='validation', add_colors=True,
+                               add_normals=False, add_instance=True, point_per_cut=100, add_raw_coordinates=True,
+                               num_labels=args.num_labels, ignore_label=args.ignore_label,
+                               filter_out_classes=args.filter_out_classes, label_offset=len(args.filter_out_classes))
     test_collator = VoxelizeCollate(mode='validation', ignore_label=args.ignore_label,
                                     num_queries=args.num_object_queries, voxel_size=args.voxelSize,
                                     filter_out_classes=args.filter_out_classes,
@@ -99,6 +99,7 @@ def main_tester(argss):
                 raise ValueError
 
             pbar.update(1)
+            torch.cuda.empty_cache()
 
         if args.task == "instance_segmentation":
             ap_3d = evaluate_instance(args, preds)
